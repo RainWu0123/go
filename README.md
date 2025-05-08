@@ -1,5 +1,5 @@
-# Firebase Studio
+# 圍棋程式（網頁版）
 
-This is a NextJS starter in Firebase Studio.
+這個程式完全由AI生成
 
 To get started, take a look at src/app/page.tsx.
