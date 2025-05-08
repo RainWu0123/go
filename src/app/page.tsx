@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { NextPage } from 'next';
@@ -5,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { SkipForward, Flag, UserCircle } from 'lucide-react'; // Removed MessageCircleWarning
+import { SkipForward, Flag, UserCircle } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
@@ -17,12 +18,6 @@ const createEmptyBoard = (): Board => {
   return Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
 };
 
-// const getBoardString = (board: Board): string => {
-//   return board.map(row => 
-//     row.map(cell => cell === 'black' ? 'B' : cell === 'white' ? 'W' : '.').join('')
-//   ).join('\n');
-// };
-
 const getMoveString = (row: number, col: number): string => {
   const letters = "ABCDEFGHJKLMNOPQRST"; // Standard Go coordinates, skipping 'I'
   return `${letters[col]}${BOARD_SIZE - row}`;
@@ -31,84 +26,177 @@ const getMoveString = (row: number, col: number): string => {
 const Home: NextPage = () => {
   const [board, setBoard] = useState<Board>(createEmptyBoard());
   const [currentPlayer, setCurrentPlayer] = useState<Player>('black');
-  // const [isThinking, setIsThinking] = useState(false); // Removed AI thinking state
-  // const [error, setError] = useState<string | null>(null); // Removed AI error state
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<Player | null>(null);
   const [clientOnly, setClientOnly] = useState(false);
+  const [blackScore, setBlackScore] = useState(0);
+  const [whiteScore, setWhiteScore] = useState(0);
   const { toast } = useToast();
 
   useEffect(() => {
     setClientOnly(true);
   }, []);
 
+  const getGroup = (
+    targetBoard: Board,
+    r: number,
+    c: number
+  ): { stones: Set<string>; liberties: Set<string> } => {
+    const player = targetBoard[r]?.[c];
+    if (!player) {
+      return { stones: new Set(), liberties: new Set() };
+    }
+
+    const stones = new Set<string>();
+    const liberties = new Set<string>();
+    const q: [number, number][] = [[r, c]];
+    const visitedThisSearch = new Set<string>(); // Visited for current BFS/DFS path
+
+    while (q.length > 0) {
+      const [currR, currC] = q.shift()!;
+      const posKey = `${currR},${currC}`;
+
+      if (visitedThisSearch.has(posKey)) continue;
+      visitedThisSearch.add(posKey);
+      
+      // Check if the current cell is on the board and belongs to the player
+      if (
+        currR >= 0 && currR < BOARD_SIZE &&
+        currC >= 0 && currC < BOARD_SIZE &&
+        targetBoard[currR][currC] === player
+      ) {
+        stones.add(posKey);
+        const neighbors = [
+          [currR - 1, currC], [currR + 1, currC],
+          [currR, currC - 1], [currR, currC + 1],
+        ];
+
+        for (const [nr, nc] of neighbors) {
+          if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+            const neighborKey = `${nr},${nc}`;
+            if (targetBoard[nr][nc] === null) {
+              liberties.add(neighborKey);
+            } else if (targetBoard[nr][nc] === player && !visitedThisSearch.has(neighborKey)) {
+              q.push([nr, nc]);
+            }
+          }
+        }
+      }
+    }
+    return { stones, liberties };
+  };
+
   const handleCellClick = async (rowIndex: number, colIndex: number) => {
-    if (gameOver || board[rowIndex][colIndex] !== null) { // Removed isThinking
+    if (gameOver || board[rowIndex][colIndex] !== null) {
       return;
     }
 
-    // No AI validation, just place the stone
-    const newBoard = board.map((row, rIdx) =>
-      row.map((cell, cIdx) => {
-        if (rIdx === rowIndex && cIdx === colIndex) {
-          return currentPlayer;
-        }
-        return cell;
-      })
-    );
-    setBoard(newBoard);
-    
-    // Basic win condition (filling the board - this is a simplification for demo)
-    // This should be replaced with actual Go scoring logic in a real game.
-    let isBoardFull = true;
-    let blackStones = 0;
-    let whiteStones = 0;
+    let tempBoard = board.map(row => [...row]);
+    tempBoard[rowIndex][colIndex] = currentPlayer;
 
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (newBoard[r][c] === null) {
-          isBoardFull = false;
-        } else if (newBoard[r][c] === 'black') {
-          blackStones++;
-        } else if (newBoard[r][c] === 'white') {
-          whiteStones++;
+    let capturedStonesThisTurn = 0;
+    const opponent = currentPlayer === 'black' ? 'white' : 'black';
+
+    // Check neighbors for captures of opponent stones
+    const neighbors = [
+      [rowIndex - 1, colIndex], [rowIndex + 1, colIndex],
+      [rowIndex, colIndex - 1], [rowIndex, colIndex + 1],
+    ];
+
+    for (const [nr, nc] of neighbors) {
+      if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && tempBoard[nr]?.[nc] === opponent) {
+        const { stones: groupStones, liberties: groupLiberties } = getGroup(tempBoard, nr, nc);
+        if (groupLiberties.size === 0) {
+          for (const stonePos of groupStones) {
+            const [sr, sc] = stonePos.split(',').map(Number);
+            if (tempBoard[sr][sc] === opponent) { // Ensure it's still an opponent stone (could be captured by another part of a larger move)
+                 tempBoard[sr][sc] = null;
+                 capturedStonesThisTurn++;
+            }
+          }
         }
       }
     }
 
-    if (isBoardFull) { // Simplified win condition
+    // Check for self-capture (suicide)
+    const { liberties: myGroupLiberties } = getGroup(tempBoard, rowIndex, colIndex);
+    if (myGroupLiberties.size === 0 && capturedStonesThisTurn === 0) {
+      toast({
+        title: "Invalid Move",
+        description: "Self-capture (suicide) is not allowed if it doesn't capture opponent stones.",
+        variant: "destructive",
+      });
+      return; // Invalid move, revert or don't apply
+    }
+
+    // Move is valid, update board and scores
+    setBoard(tempBoard);
+    if (currentPlayer === 'black') {
+      setBlackScore(prev => prev + capturedStonesThisTurn);
+    } else {
+      setWhiteScore(prev => prev + capturedStonesThisTurn);
+    }
+
+    if (capturedStonesThisTurn > 0) {
+      toast({
+        title: "Capture!",
+        description: `${currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1)} captured ${capturedStonesThisTurn} stone(s).`,
+      });
+    }
+    
+    // Simplified win condition (filling the board) - can be expanded later
+    let isBoardFull = true;
+    let blackStonesCount = 0;
+    let whiteStonesCount = 0;
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (tempBoard[r][c] === null) {
+          isBoardFull = false;
+        } else if (tempBoard[r][c] === 'black') {
+          blackStonesCount++;
+        } else if (tempBoard[r][c] === 'white') {
+          whiteStonesCount++;
+        }
+      }
+    }
+
+    if (isBoardFull) {
       setGameOver(true);
-      const gameWinner = blackStones > whiteStones ? 'black' : whiteStones > blackStones ? 'white' : null; // Could be a draw
+      // Final scoring might include territory, but here it's just stone count + captures
+      const finalBlackScore = blackStonesCount + blackScore;
+      const finalWhiteScore = whiteStonesCount + whiteScore;
+      const gameWinner = finalBlackScore > finalWhiteScore ? 'black' : finalWhiteScore > finalBlackScore ? 'white' : null;
+      
       if (gameWinner) {
         setWinner(gameWinner);
         toast({
             title: "Game Over!",
-            description: `${gameWinner.charAt(0).toUpperCase() + gameWinner.slice(1)} wins by filling the board!`,
+            description: `${gameWinner.charAt(0).toUpperCase() + gameWinner.slice(1)} wins by filling the board! Final Score: Black ${finalBlackScore}, White ${finalWhiteScore}`,
         });
       } else {
          toast({
             title: "Game Over!",
-            description: "It's a draw by filling the board!",
+            description: `It's a draw by filling the board! Final Score: Black ${finalBlackScore}, White ${finalWhiteScore}`,
         });
       }
     } else {
-      setCurrentPlayer(currentPlayer === 'black' ? 'white' : 'black');
+      setCurrentPlayer(opponent);
     }
   };
 
   const handlePass = () => {
-    if (gameOver) return; // Removed isThinking
-    // In a real Go game, two consecutive passes end the game.
-    // This is a simplified implementation.
+    if (gameOver) return;
     setCurrentPlayer(currentPlayer === 'black' ? 'white' : 'black');
     toast({
       title: "Pass",
-      description: `${currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1)} passed their turn.`,
+      description: `${currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1)} passed their turn. It is now ${currentPlayer === 'black' ? 'White' : 'Black'}'s turn.`,
     });
+    // Note: Two consecutive passes usually end the game in Go. This simplified logic doesn't implement that.
   };
   
   const handleResign = () => {
-    if (gameOver) return; // Removed isThinking
+    if (gameOver) return;
     setGameOver(true);
     const resignee = currentPlayer;
     const winnerPlayer = resignee === 'black' ? 'white' : 'black';
@@ -122,16 +210,15 @@ const Home: NextPage = () => {
   const handleReset = () => {
     setBoard(createEmptyBoard());
     setCurrentPlayer('black');
-    // setError(null); // Removed error state
     setGameOver(false);
     setWinner(null);
-    // setIsThinking(false); // Removed thinking state
+    setBlackScore(0);
+    setWhiteScore(0);
     toast({
       title: "Game Reset",
       description: "The board has been reset. Black to play.",
     });
   };
-
 
   if (!clientOnly) {
     return null; // Or a loading spinner
@@ -145,8 +232,8 @@ const Home: NextPage = () => {
           <CardTitle className="text-4xl font-bold text-primary">Go Dojo</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col md:flex-row items-center md:items-start justify-between mb-6">
-            <div className="flex items-center space-x-2 mb-4 md:mb-0">
+          <div className="flex flex-col md:flex-row items-center md:items-start justify-between mb-4">
+            <div className="flex items-center space-x-2 mb-2 md:mb-0">
               <UserCircle className={`w-8 h-8 ${currentPlayer === 'black' ? 'text-foreground' : 'text-muted-foreground'}`} />
               <span className={`text-xl font-semibold ${currentPlayer === 'black' ? 'text-foreground' : 'text-muted-foreground'}`}>
                 {currentPlayer === 'black' ? 'Black' : 'White'} to Play
@@ -162,7 +249,10 @@ const Home: NextPage = () => {
             </div>
           </div>
 
-          {/* Removed AI error display Alert */}
+          <div className="flex justify-around mb-6 text-lg">
+            <div>Black Captures: <span className="font-bold">{blackScore}</span></div>
+            <div>White Captures: <span className="font-bold">{whiteScore}</span></div>
+          </div>
 
           {gameOver && winner && (
             <Alert variant="default" className="mb-6 bg-primary text-primary-foreground">
@@ -170,6 +260,17 @@ const Home: NextPage = () => {
               <AlertTitle className="text-primary-foreground">Game Over!</AlertTitle>
               <AlertDescription className="text-primary-foreground">
                 {winner.charAt(0).toUpperCase() + winner.slice(1)} wins!
+                (Black: {blackScore + board.flat().filter(s => s === 'black').length}, White: {whiteScore + board.flat().filter(s => s === 'white').length})
+              </AlertDescription>
+            </Alert>
+          )}
+           {gameOver && !winner && ( // Draw condition based on simplified board full
+            <Alert variant="default" className="mb-6 bg-primary text-primary-foreground">
+              <Flag className="h-4 w-4 text-primary-foreground" />
+              <AlertTitle>Game Over!</AlertTitle>
+              <AlertDescription>
+                It's a draw! 
+                (Black: {blackScore + board.flat().filter(s => s === 'black').length}, White: {whiteScore + board.flat().filter(s => s === 'white').length})
               </AlertDescription>
             </Alert>
           )}
@@ -179,8 +280,8 @@ const Home: NextPage = () => {
             style={{
               gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
               aspectRatio: '1 / 1',
-              maxWidth: '700px', // Max width for the board itself
-              margin: '0 auto', // Center the board
+              maxWidth: '700px', 
+              margin: '0 auto', 
             }}
             aria-label="Go Board"
           >
@@ -192,16 +293,13 @@ const Home: NextPage = () => {
                   onClick={() => handleCellClick(rowIndex, colIndex)}
                   onKeyPress={(e) => e.key === 'Enter' && handleCellClick(rowIndex, colIndex)}
                   role="button"
-                  tabIndex={0}
-                  aria-label={`Board cell ${getMoveString(rowIndex, colIndex)}. ${cell ? cell + ' stone' : 'Empty'}`}
+                  tabIndex={gameOver || board[rowIndex][colIndex] !== null ? -1 : 0}
+                  aria-label={`Board cell ${getMoveString(rowIndex, colIndex)}. ${cell ? cell + ' stone' : 'Empty'}. Click to place a ${currentPlayer} stone.`}
+                  aria-disabled={gameOver || board[rowIndex][colIndex] !== null}
                 >
-                  {/* Grid lines */}
-                  {/* Horizontal line */}
                   <div className="absolute top-1/2 left-0 w-full h-px bg-primary/30 transform -translate-y-1/2"></div>
-                  {/* Vertical line */}
                   <div className="absolute left-1/2 top-0 h-full w-px bg-primary/30 transform -translate-x-1/2"></div>
                   
-                  {/* Star points (Hoshi) - for a standard 19x19 board */}
                   {((rowIndex === 3 || rowIndex === 9 || rowIndex === 15) &&
                     (colIndex === 3 || colIndex === 9 || colIndex === 15)) && (
                     <div className="absolute w-1.5 h-1.5 bg-primary/50 rounded-full"></div>
@@ -209,7 +307,7 @@ const Home: NextPage = () => {
 
                   {cell && (
                     <div
-                      className={`absolute w-5/6 h-5/6 rounded-full shadow-md transition-transform duration-150 ease-out transform group-hover:scale-105 ${
+                      className={`absolute w-5/6 h-5/6 rounded-full shadow-md transition-transform duration-150 ease-out ${
                         cell === 'black' ? 'bg-foreground' : 'bg-background border-2 border-neutral-400'
                       }`}
                       style={{ animation: 'placeStone 0.2s ease-out' }}
