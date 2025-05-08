@@ -2,11 +2,10 @@
 
 import type { NextPage } from 'next';
 import { useState, useEffect } from 'react';
-import { validateMove, type ValidateMoveInput, type ValidateMoveOutput } from '@/ai/flows/validate-move';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { SkipForward, Flag, MessageCircleWarning, UserCircle } from 'lucide-react';
+import { SkipForward, Flag, UserCircle } from 'lucide-react'; // Removed MessageCircleWarning
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 
@@ -18,11 +17,11 @@ const createEmptyBoard = (): Board => {
   return Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
 };
 
-const getBoardString = (board: Board): string => {
-  return board.map(row => 
-    row.map(cell => cell === 'black' ? 'B' : cell === 'white' ? 'W' : '.').join('')
-  ).join('\n');
-};
+// const getBoardString = (board: Board): string => {
+//   return board.map(row => 
+//     row.map(cell => cell === 'black' ? 'B' : cell === 'white' ? 'W' : '.').join('')
+//   ).join('\n');
+// };
 
 const getMoveString = (row: number, col: number): string => {
   const letters = "ABCDEFGHJKLMNOPQRST"; // Standard Go coordinates, skipping 'I'
@@ -32,8 +31,8 @@ const getMoveString = (row: number, col: number): string => {
 const Home: NextPage = () => {
   const [board, setBoard] = useState<Board>(createEmptyBoard());
   const [currentPlayer, setCurrentPlayer] = useState<Player>('black');
-  const [isThinking, setIsThinking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // const [isThinking, setIsThinking] = useState(false); // Removed AI thinking state
+  // const [error, setError] = useState<string | null>(null); // Removed AI error state
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<Player | null>(null);
   const [clientOnly, setClientOnly] = useState(false);
@@ -44,67 +43,63 @@ const Home: NextPage = () => {
   }, []);
 
   const handleCellClick = async (rowIndex: number, colIndex: number) => {
-    if (gameOver || board[rowIndex][colIndex] !== null || isThinking) {
+    if (gameOver || board[rowIndex][colIndex] !== null) { // Removed isThinking
       return;
     }
 
-    setIsThinking(true);
-    setError(null);
-
-    const moveString = getMoveString(rowIndex, colIndex);
-    const boardString = getBoardString(board);
-
-    try {
-      const validationInput: ValidateMoveInput = {
-        boardState: boardString,
-        move: moveString,
-      };
-      const validationResult: ValidateMoveOutput = await validateMove(validationInput);
-
-      if (validationResult.isValid) {
-        const newBoard = board.map((row, rIdx) =>
-          row.map((cell, cIdx) => {
-            if (rIdx === rowIndex && cIdx === colIndex) {
-              return currentPlayer;
-            }
-            return cell;
-          })
-        );
-        setBoard(newBoard);
-        // Basic win condition (filling the board - this is a simplification for demo)
-        if (newBoard.every(row => row.every(cell => cell !== null))) {
-          setGameOver(true);
-          setWinner(currentPlayer); // Simplistic: last player to move wins if board is full
-          toast({
-            title: "Game Over!",
-            description: `${currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1)} wins!`,
-          });
-        } else {
-          setCurrentPlayer(currentPlayer === 'black' ? 'white' : 'black');
+    // No AI validation, just place the stone
+    const newBoard = board.map((row, rIdx) =>
+      row.map((cell, cIdx) => {
+        if (rIdx === rowIndex && cIdx === colIndex) {
+          return currentPlayer;
         }
-      } else {
-        setError(validationResult.reason || 'Invalid move.');
+        return cell;
+      })
+    );
+    setBoard(newBoard);
+    
+    // Basic win condition (filling the board - this is a simplification for demo)
+    // This should be replaced with actual Go scoring logic in a real game.
+    let isBoardFull = true;
+    let blackStones = 0;
+    let whiteStones = 0;
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (newBoard[r][c] === null) {
+          isBoardFull = false;
+        } else if (newBoard[r][c] === 'black') {
+          blackStones++;
+        } else if (newBoard[r][c] === 'white') {
+          whiteStones++;
+        }
+      }
+    }
+
+    if (isBoardFull) { // Simplified win condition
+      setGameOver(true);
+      const gameWinner = blackStones > whiteStones ? 'black' : whiteStones > blackStones ? 'white' : null; // Could be a draw
+      if (gameWinner) {
+        setWinner(gameWinner);
         toast({
-          variant: "destructive",
-          title: "Invalid Move",
-          description: validationResult.reason || "The AI determined this move is not allowed.",
+            title: "Game Over!",
+            description: `${gameWinner.charAt(0).toUpperCase() + gameWinner.slice(1)} wins by filling the board!`,
+        });
+      } else {
+         toast({
+            title: "Game Over!",
+            description: "It's a draw by filling the board!",
         });
       }
-    } catch (e) {
-      console.error("Error validating move:", e);
-      setError('Failed to validate move. Please try again.');
-       toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Could not connect to AI validation service.",
-      });
-    } finally {
-      setIsThinking(false);
+    } else {
+      setCurrentPlayer(currentPlayer === 'black' ? 'white' : 'black');
     }
   };
 
   const handlePass = () => {
-    if (gameOver || isThinking) return;
+    if (gameOver) return; // Removed isThinking
+    // In a real Go game, two consecutive passes end the game.
+    // This is a simplified implementation.
     setCurrentPlayer(currentPlayer === 'black' ? 'white' : 'black');
     toast({
       title: "Pass",
@@ -113,7 +108,7 @@ const Home: NextPage = () => {
   };
   
   const handleResign = () => {
-    if (gameOver || isThinking) return;
+    if (gameOver) return; // Removed isThinking
     setGameOver(true);
     const resignee = currentPlayer;
     const winnerPlayer = resignee === 'black' ? 'white' : 'black';
@@ -127,10 +122,10 @@ const Home: NextPage = () => {
   const handleReset = () => {
     setBoard(createEmptyBoard());
     setCurrentPlayer('black');
-    setError(null);
+    // setError(null); // Removed error state
     setGameOver(false);
     setWinner(null);
-    setIsThinking(false);
+    // setIsThinking(false); // Removed thinking state
     toast({
       title: "Game Reset",
       description: "The board has been reset. Black to play.",
@@ -158,22 +153,16 @@ const Home: NextPage = () => {
               </span>
             </div>
             <div className="flex items-center space-x-2">
-              <Button variant="outline" onClick={handlePass} disabled={isThinking || gameOver} className="bg-accent text-accent-foreground hover:bg-accent/90">
+              <Button variant="outline" onClick={handlePass} disabled={gameOver} className="bg-accent text-accent-foreground hover:bg-accent/90">
                 <SkipForward className="mr-2 h-5 w-5" /> Pass
               </Button>
-              <Button variant="destructive" onClick={handleResign} disabled={isThinking || gameOver}>
+              <Button variant="destructive" onClick={handleResign} disabled={gameOver}>
                 <Flag className="mr-2 h-5 w-5" /> Resign
               </Button>
             </div>
           </div>
 
-          {error && (
-            <Alert variant="destructive" className="mb-6">
-              <MessageCircleWarning className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          {/* Removed AI error display Alert */}
 
           {gameOver && winner && (
             <Alert variant="default" className="mb-6 bg-primary text-primary-foreground">
